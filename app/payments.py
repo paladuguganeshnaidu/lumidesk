@@ -312,8 +312,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if not webhook_secret or not secret_key:
         raise HTTPException(status_code=503, detail="Stripe webhook is not configured.")
     try:
-        stripe, _, configured_live_mode = _stripe_credentials()
-        event = stripe.construct_event(payload, signature, webhook_secret)
+        _stripe_client, _, configured_live_mode = _stripe_credentials()
+        from stripe import Webhook
+        event = Webhook.construct_event(payload, signature, webhook_secret)
     except Exception as exc:
         logging.warning("Rejected Stripe webhook: signature or configuration error")
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature.") from exc
