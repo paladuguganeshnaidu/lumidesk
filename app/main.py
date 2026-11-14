@@ -27,6 +27,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .ai import AIUnavailable, rewrite_report_pages, tutor_response
 from .db import ReportRecord, UsageEvent, User, daily_count, get_db, init_db, record_usage, upsert_user
 from .pdf_engine import inspect_pdf, render_replacement_pdf
+from .pdf_quality import verify_pdf_layout
 from .typography import summarize_typography
 from .report_pipeline import extract_template_details, content_slots, build_plan, extract_approved_reference_context
 from .report_jobs import create_job, for_user, public_job
@@ -234,7 +235,8 @@ async def _read_report_upload(file: UploadFile) -> bytes:
     source = await file.read((MAX_UPLOAD_MB * 1024 * 1024) + 1)
     if len(source) > MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"The selected PDF is larger than {MAX_UPLOAD_MB} MB.")
-    if not source.startswith(b"%PDF-"):
+    # ISO-compliant PDFs may contain a short binary preamble before the header.
+    if b"%PDF-" not in source[:1024]:
         raise HTTPException(status_code=422, detail="This is not a readable PDF document.")
     return source
 
@@ -256,7 +258,7 @@ async def analyze_report_template(request: Request, file: UploadFile = File(...)
     require_csrf(request)
     current_user(request)
     source = await _read_report_upload(file)
-    template = _read_template(source)
+    template = await asyncio.to_thread(_read_template, source)
     analysis = extract_template_details(template)
     slots = content_slots(template)
     analysis["typography"] = summarize_typography(template)
@@ -514,19 +516,20 @@ async def api_generate_report(
     if not all((title, topic, student_name, usn)):
         raise HTTPException(status_code=422, detail="Enter your project title, what it does, your name, and your USN or registration number.")
     source = await _read_report_upload(file)
-    template = _read_template(source)
+    template = await asyncio.to_thread(_read_template, source)
     analysis = extract_template_details(template)
     sections = content_slots(template)
     if not sections:
-        raise HTTPException(status_code=422, detail="This PDF has no clearly identifiable body sections to rewrite. Try a text-based report with section headings.")
+        raise HTTPException(status_code=422, detail="No editable body text was identified. Use a searchable PDF with several body paragraphs, or convert this scan to a selectable-text PDF.")
     try:
         # Chunked section-level writing uses bounded retries, not one enormous
         # prompt that can truncate and leave the document half rewritten.
         generated_pages = await asyncio.wait_for(rewrite_report_pages(title=title, topic=topic, sections=sections), timeout=155)
-        plan = build_plan(template, analysis, title, student_name, usn, generated_pages)
+        plan = build_plan(template, analysis, title, student_name, usn, generated_pages, preserve_references=True)
         if plan["rewritten_body_slots"] != plan["planned_body_slots"] or plan["rejected_ai_slots"]:
             raise ValueError("A report section was incomplete or exceeded its original line lengths. Please retry with a clearer topic description.")
-        output, fit_warnings = render_replacement_pdf(source, template, plan)
+        output, fit_warnings = await asyncio.to_thread(render_replacement_pdf, source, template, plan)
+        quality = await asyncio.to_thread(verify_pdf_layout, source, output, template, plan)
     except AIUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except asyncio.TimeoutError as exc:
@@ -542,9 +545,10 @@ async def api_generate_report(
     db.commit()
     safe_name = "".join(c for c in title if c.isalnum() or c in " -_").strip().replace(" ", "_")[:50] or "Student_Report"
     import urllib.parse, json
-    warnings = analysis["warnings"] + ["Any original references must be replaced with verified sources for the new topic; draft certification and declarations require authorization."] + fit_warnings
+    warnings = analysis["warnings"] + ["Original references remain visible but must be verified or replaced for the new project. Draft certification requires authorized approval."] + fit_warnings
     headers = {"Content-Disposition": f'attachment; filename="{safe_name}_LumiDesk.pdf"',
                "X-Report-Warnings": str(len(warnings)),
+               "X-Visual-QA": quality["status"],
                "X-Report-Warning-Details": urllib.parse.quote(json.dumps(warnings[:12], ensure_ascii=False))}
     return Response(content=output, media_type="application/pdf", headers=headers)
 
