@@ -42,9 +42,9 @@ def has_paid_pdf_access(db: Session, user: dict, job_id: str) -> bool:
             ReportPayment.status == "paid",
         )
     )
-    return bool(payment and (payment.tester_bypass or (
+    return bool(payment and (
         payment.amount_paise == PDF_PRICE_PAISE and payment.currency == PDF_CURRENCY
-    )))
+    ))
 
 
 def _stripe_credentials() -> tuple[object, str, bool]:
