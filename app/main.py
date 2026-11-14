@@ -39,6 +39,8 @@ BASE_DIR = Path(__file__).resolve().parent
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 IS_PROD = APP_ENV == "production"
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-change-this-secret-before-deploy")
+if IS_PROD and (len(SECRET_KEY) < 32 or SECRET_KEY == "dev-only-change-this-secret-before-deploy"):
+    raise RuntimeError("Set a strong, random SECRET_KEY in production before starting LumiDesk.")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "30"))
 TUTOR_LIMIT = max(0, int(os.getenv("DAILY_TUTOR_LIMIT", "0")))
 REPORT_LIMIT = max(0, int(os.getenv("DAILY_REPORT_LIMIT", "0")))
