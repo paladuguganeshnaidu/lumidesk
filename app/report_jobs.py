@@ -21,6 +21,7 @@ from .ai import rewrite_report_pages
 from .db import ReportRecord, SessionLocal, record_usage
 from .pdf_engine import inspect_pdf, render_replacement_pdf
 from .docx_export import export_editable_docx
+from .pdf_quality import verify_pdf_layout, LayoutQualityError
 from .report_pipeline import build_plan, content_slots, extract_template_details
 
 KEEP_SECONDS = 60 * 60
@@ -51,6 +52,7 @@ class ReportJob:
     total_sections: int = 0
     result: bytes | None = None
     word_result: bytes | None = None
+    quality: dict | None = None
     base_result: bytes | None = None  # unmodified generated PDF for reversible image edits
     image_edits: dict[str, bytes] = field(default_factory=dict)
     edit_busy: bool = False
@@ -118,6 +120,7 @@ def public_job(job: ReportJob) -> dict[str, Any]:
         'source_overlap_estimate': job.source_overlap,
         'done_sections': job.done_sections, 'total_sections': job.total_sections,
         'pages': job.total_sections, 'warnings': job.warnings[:14],
+        'quality': {k:v for k,v in job.quality.items() if k != 'page_checks'} if job.quality else None,
         'overlap_estimate': job.overlap,
         'download_url': f'/api/reports/jobs/{job.id}/download?format=pdf' if job.status == 'completed' else None,
         'downloads': {
@@ -216,7 +219,8 @@ async def run_job(job: ReportJob) -> None:
                 job.warnings.append('A reference file is not evidence of your own work. Replace photos and verify all citations, dates, outcomes and faculty approval.')
             job.detail = 'Fitting replacement text into the existing PDF layout…'
             plan = build_plan(template, analysis, job.title, job.student_name, job.usn, generated,
-                              preserve_references=job.mode == 'approved_reference')
+                              preserve_references=True)
+            job.warnings.append('Original references remain visually in place. Verify each source against your actual work before submission.')
             if plan['rewritten_body_slots'] != plan['planned_body_slots'] or plan['rejected_ai_slots']:
                 # Do not pass through incomplete model output as if it were verified.
                 job.warnings.append('Some text areas needed review after the layout-fitting check.')
@@ -229,6 +233,8 @@ async def run_job(job: ReportJob) -> None:
                     raise ValueError('The reconstructed document had a different page count.')
                 if final.is_encrypted or not result.startswith(b'%PDF-'):
                     raise ValueError('The reconstructed file was not a valid readable PDF.')
+            job.detail = 'Visually comparing every generated PDF page against your uploaded template…'
+            job.quality = await asyncio.to_thread(verify_pdf_layout, job.source, result, template, plan)
             # Generate DOCX from the exact completed PDF so both files contain
             # the same body text, images and page ordering.
             job.detail = 'Building editable Word textboxes with the measured font positions…'
@@ -245,7 +251,8 @@ async def run_job(job: ReportJob) -> None:
             job.result = result
             job.pages = generated
             job.done_sections = job.total_sections
-            job.detail = 'PDF and editable Word ready for review.' if job.word_result else 'PDF ready; Word needs review.'
+            job.detail = ('PDF and Word ready. Visual layout comparison passed on every page.' if job.word_result
+                          else 'PDF ready. Visual layout comparison passed; Word needs review.')
             job.status = 'completed'
             try:
                 with SessionLocal() as db:
