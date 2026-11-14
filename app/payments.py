@@ -59,10 +59,10 @@ def _stripe_credentials() -> tuple[object, str, bool]:
     if live_enabled and not live_mode:
         raise HTTPException(status_code=503, detail="Live payments are enabled, but STRIPE_SECRET_KEY is not a live key.")
     try:
-        import stripe
+        from stripe import StripeClient
     except ImportError as exc:
         raise HTTPException(status_code=503, detail="Stripe SDK is not installed on this deployment.") from exc
-    return stripe, secret, live_mode
+    return StripeClient(secret), secret, live_mode
 
 
 def _public_base_url(request: Request) -> str:
@@ -97,11 +97,11 @@ def _mark_paid(db: Session, payment: ReportPayment, session, *, live_mode: bool)
         or int(_value(session, "amount_total", 0) or 0) != PDF_PRICE_PAISE
         or str(_value(session, "currency", "")).lower() != PDF_CURRENCY
         or bool(_value(session, "livemode", False)) != live_mode
-        or str(metadata.get("purpose", "")) != "report_pdf_download"
-        or str(metadata.get("amount_paise", "")) != str(PDF_PRICE_PAISE)
-        or str(metadata.get("currency", "")).lower() != PDF_CURRENCY
-        or str(metadata.get("report_job_id", "")) != payment.report_job_id
-        or str(metadata.get("user_id", "")) != str(payment.user_id)
+        or str(_value(metadata, "purpose", "")) != "report_pdf_download"
+        or str(_value(metadata, "amount_paise", "")) != str(PDF_PRICE_PAISE)
+        or str(_value(metadata, "currency", "")).lower() != PDF_CURRENCY
+        or str(_value(metadata, "report_job_id", "")) != payment.report_job_id
+        or str(_value(metadata, "user_id", "")) != str(payment.user_id)
         or str(_value(session, "client_reference_id", "")) != str(payment.user_id)
     ):
         return False
@@ -159,7 +159,7 @@ def create_pdf_checkout(job_id: str, request: Request, db: Session = Depends(get
     # Reuse an open Checkout Session rather than creating duplicate charges.
     if payment and payment.status == "pending" and payment.stripe_session_id:
         try:
-            existing = stripe.checkout.Session.retrieve(payment.stripe_session_id, api_key=secret)
+            existing = stripe.v1.checkout.sessions.retrieve(payment.stripe_session_id)
         except Exception as exc:
             logging.exception("Could not retrieve existing Stripe Checkout Session")
             raise HTTPException(status_code=502, detail="Could not check the existing payment session. Please retry.") from exc
@@ -219,9 +219,9 @@ def create_pdf_checkout(job_id: str, request: Request, db: Session = Depends(get
     cancel_url = f"{base_url}/app?tab=reports&payment=cancelled&job_id={encoded_job}"
 
     try:
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{
+        session = stripe.v1.checkout.sessions.create({
+            "mode": "payment",
+            "line_items":[{
                 "quantity": 1,
                 "price_data": {
                     "currency": PDF_CURRENCY,
@@ -232,18 +232,16 @@ def create_pdf_checkout(job_id: str, request: Request, db: Session = Depends(get
                     },
                 },
             }],
-            success_url=success_url,
-            cancel_url=cancel_url,
-            client_reference_id=str(user["id"]),
-            customer_email=user["email"],
-            metadata=metadata,
-            payment_intent_data={"metadata": metadata},
+            "success_url":success_url,
+            "cancel_url":cancel_url,
+            "client_reference_id":str(user["id"]),
+            "customer_email":user["email"],
+            "metadata":metadata,
+            "payment_intent_data":{"metadata": metadata},
             # Intentionally omit payment_method_types. Stripe Dashboard
             # dynamic payment methods choose only methods eligible for this
             # account, currency, amount and customer location.
-            api_key=secret,
-            idempotency_key=f"lumidesk-pdf-{user['id']}-{job_id}-{payment.attempt}",
-        )
+        }, options={"idempotency_key": f"lumidesk-pdf-{user['id']}-{job_id}-{payment.attempt}"})
         session_url = _value(session, "url")
         session_id = _value(session, "id")
         if not session_id or not session_url:
@@ -285,7 +283,7 @@ def pdf_payment_status(job_id: str, request: Request, db: Session = Depends(get_
     if payment and payment.status == "pending" and payment.stripe_session_id:
         try:
             stripe, secret, live_mode = _stripe_credentials()
-            session = stripe.checkout.Session.retrieve(payment.stripe_session_id, api_key=secret)
+            session = stripe.v1.checkout.sessions.retrieve(payment.stripe_session_id)
             if _value(session, "status") == "complete" and _mark_paid(db, payment, session, live_mode=live_mode):
                 return {"paid": True, "bypass": False, "status": "paid", "amount_paise": PDF_PRICE_PAISE, "currency": PDF_CURRENCY}
         except HTTPException:
@@ -313,7 +311,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Stripe webhook is not configured.")
     try:
         stripe, _, configured_live_mode = _stripe_credentials()
-        event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
+        event = stripe.construct_event(payload, signature, webhook_secret)
     except Exception as exc:
         logging.warning("Rejected Stripe webhook: signature or configuration error")
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature.") from exc
