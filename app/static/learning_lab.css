@@ -99,3 +99,20 @@
 .workspace-page .learning-graph-node:hover rect,.workspace-page .learning-graph-node.active rect,.workspace-page .learning-graph-node:focus-visible rect{stroke:#E8913C;stroke-width:2.4}
 @media(max-width:700px){.workspace-page .learning-graph-svg{min-width:720px}}
 @media(prefers-reduced-motion:reduce){.workspace-page .learning-graph-node rect{transition:none}}
+
+/* Touch target correction: isolate each horizontally scrolling concept control. */
+.workspace-page .learning-node-track{
+  display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;
+  align-items:stretch!important;justify-content:flex-start!important;
+  gap:10px!important;min-height:118px;position:relative;isolation:isolate
+}
+.workspace-page .learning-node-track .learning-node{
+  position:relative!important;inset:auto!important;transform:none!important;
+  display:flex!important;flex:0 0 151px!important;min-width:151px!important;
+  max-width:151px!important;width:151px!important;
+  float:none!important;margin:0!important;
+  box-sizing:border-box;z-index:0;touch-action:pan-x
+}
+.workspace-page .learning-node-track .learning-node:focus-visible{
+  z-index:2;outline:2px solid var(--amber);outline-offset:-2px
+}
