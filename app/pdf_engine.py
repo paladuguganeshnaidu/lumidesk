@@ -224,10 +224,22 @@ def render_replacement_pdf(source: bytes, template: dict, plan: dict) -> tuple[b
                             raise ValueError(
                                 f"Page {pidx+1}: one long word cannot fit the original line.")
                     else:
-                        raise ValueError(
-                            f"Page {pidx+1}, line {block['block_id']+1}: replacement "
-                            f"exceeds the original {font_size:g} pt line width. "
-                            "Rewrite it more concisely.")
+                        # Repeated running titles/captions may have less room than
+                        # the cover title. Avoid changing font metrics or page
+                        # geometry; shorten only secondary text, never an ID.
+                        if re.search(r"\b\d[A-Za-z]{2}\d{2}[A-Za-z]{2}\d{3}\b", text):
+                            raise ValueError(
+                                f"Page {pidx+1}: registration number would be clipped at the source font size.")
+                        while text_width>available+.4 and len(text.split())>1:
+                            text=' '.join(text.split()[:-1])
+                            text_width=font.text_length(text,fontsize=target_size)
+                        item['plan_item']['text']=text
+                        warnings.append(
+                            f"Page {pidx+1}, line {block['block_id']+1}: secondary "
+                            "caption shortened to retain the original font and page margin.")
+                        if text_width>available+.4:
+                            raise ValueError(
+                                f"Page {pidx+1}: the replacement cannot fit the original text area.")
             original_baseline = block.get('origin', [start_x, rect.y1])
             baseline = float(original_baseline[1])
             # Directly retain the PDF baseline. If shrinking text is necessary,
