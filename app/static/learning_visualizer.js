@@ -276,6 +276,21 @@
         research.status==='not_requested'
           ? 'Web search is off. Turn on “Find sources on the web” before your next question to see reading links.'
           : string(research.note||'No live reading links could be found.')));
+      if(research.status==='unavailable'){
+        const term=encodeURIComponent(string(research.query||data.title).slice(0,120));
+        if(term){
+          const searchLinks=make('div','learning-actions');
+          [
+            ['Search Wikipedia directly','https://en.wikipedia.org/w/index.php?search='+term],
+            ['Search OpenAlex directly','https://openalex.org/works?search='+term],
+          ].forEach(([name,url])=>{
+            const link=make('a','learning-action-button',name);
+            link.href=url;link.target='_blank';link.rel='noopener noreferrer';
+            searchLinks.append(link);
+          });
+          sourceBox.append(searchLinks);
+        }
+      }
     }
     sourceBox.append(make('p','learning-source-disclaimer',
       'References are linked for further reading, not automatically verified endorsements. Read them to check AI explanations.'));
