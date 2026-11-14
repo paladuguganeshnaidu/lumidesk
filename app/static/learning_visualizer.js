@@ -83,9 +83,73 @@
       const detailText=make('p','','');
       const relation=make('p','learning-relation','');
       add(detail,detailTitle,detailText,relation);
+      // Draw a genuine connected graph in local SVG (no remote service, no
+      // AI-generated HTML). The button pathway below is the keyboard fallback.
+      const graphScroller=make('div','learning-graph-scroller');
+      const SVG='http://www.w3.org/2000/svg';
+      const svg=(tag,attrs={},text='')=>{
+        const el=document.createElementNS(SVG,tag);
+        for(const [k,v] of Object.entries(attrs))el.setAttribute(k,String(v));
+        if(text)el.textContent=String(text);
+        return el;
+      };
+      const graph=svg('svg',{viewBox:'0 0 960 292',class:'learning-graph-svg',
+        role:'img','aria-label':'Connected diagram of '+nodes.length+' concepts'});
+      const positions=new Map();
+      nodes.forEach((node,i)=>positions.set(node.id,{
+        x:(i+.5)*960/nodes.length,
+        y:nodes.length===1?145:(i%2?202:91)
+      }));
+      const defs=svg('defs');
+      const marker=svg('marker',{id:'lumi-learning-arrow',markerWidth:9,markerHeight:9,
+        refX:8,refY:4,orient:'auto',markerUnits:'strokeWidth'});
+      marker.append(svg('path',{d:'M 0 0 L 8 4 L 0 8 z',fill:'#6C7378'}));
+      defs.append(marker);graph.append(defs);
+      edges.forEach(edge=>{
+        const a=positions.get(edge.from),b=positions.get(edge.to);
+        if(!a||!b)return;
+        const curve='M '+a.x+' '+a.y+' C '+(a.x+(b.x-a.x)*.48)+' '+a.y+
+          ' '+(a.x+(b.x-a.x)*.52)+' '+b.y+' '+b.x+' '+b.y;
+        graph.append(svg('path',{d:curve,fill:'none',stroke:'#6C7378',
+          'stroke-width':1.3,'stroke-opacity':.72,'marker-end':'url(#lumi-learning-arrow)'}));
+      });
+      const graphGroups=[];
+      nodes.forEach((node,i)=>{
+        const loc=positions.get(node.id);
+        const g=svg('g',{class:'learning-graph-node',role:'button',tabindex:0,
+          'aria-label':'Explore '+string(node.label)});
+        g.append(svg('rect',{x:loc.x-58,y:loc.y-31,width:116,height:62,rx:3,
+          fill:'#101317',stroke:'rgba(237,231,220,.26)'}));
+        g.append(svg('circle',{cx:loc.x-42,cy:loc.y-17,r:3.3,fill:'#E8913C'}));
+        const title=string(node.label);
+        const words=title.split(/\s+/);
+        const lines=[];
+        let current='';
+        words.forEach(word=>{
+          if((current+' '+word).trim().length>15&&current){lines.push(current);current=word;}
+          else current=(current+' '+word).trim();
+        });
+        if(current)lines.push(current);
+        if(lines.length>2){lines[1]=lines.slice(1).join(' ').slice(0,15)+'…';lines.length=2;}
+        const label=svg('text',{x:loc.x,y:loc.y-(lines.length>1?3:0),
+          'text-anchor':'middle','dominant-baseline':'central',
+          fill:'#EDE7DC','font-size':12,'font-weight':600,'font-family':'Sora, sans-serif'});
+        lines.slice(0,2).forEach((line,j)=>{
+          const span=svg('tspan',{x:loc.x,dy:j===0?(lines.length>1?-5:0):17},line);
+          label.append(span);
+        });
+        g.append(label);
+        g.addEventListener('click',()=>select(i));
+        g.addEventListener('keydown',event=>{
+          if(event.key==='Enter'||event.key===' '){event.preventDefault();select(i);}
+        });
+        graphGroups.push(g);graph.append(g);
+      });
+      graphScroller.append(graph);
       const nodeButtons=[];
       let active=0;
       const select=(i,focus=false)=>{
+        graphGroups.forEach((el,j)=>el.classList.toggle('active',j===((i+nodes.length)%nodes.length)));
         active=(i+nodes.length)%nodes.length;
         nodeButtons.forEach((btn,j)=>{
           btn.setAttribute('aria-pressed', String(active===j));
@@ -119,7 +183,7 @@
         });
         nodeButtons.push(el);track.append(el);
       });
-      add(view,mapHeading,track,detail);
+      add(view,mapHeading,graphScroller,track,detail);
       section.append(view);
       select(0);
     }
