@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
 from .ai import AIUnavailable, rewrite_report_pages, tutor_response
-from .db import ReportRecord, UsageEvent, User, daily_count, get_db, init_db, record_usage, upsert_user
+from .db import ReportPayment, ReportRecord, UsageEvent, User, daily_count, get_db, init_db, record_usage, upsert_user
 from .pdf_engine import inspect_pdf, render_replacement_pdf
 from .typography import summarize_typography
 from .report_pipeline import extract_template_details, content_slots, build_plan, extract_approved_reference_context
@@ -484,12 +484,18 @@ def admin_overview(request: Request, db: Session = Depends(get_db)):
     users = int(db.scalar(select(func.count(User.id))) or 0)
     active = int(db.scalar(select(func.count(User.id)).where(User.last_login >= since)) or 0)
     reports = int(db.scalar(select(func.count(ReportRecord.id))) or 0)
+    paid_pdf_downloads = int(db.scalar(select(func.count(ReportPayment.id)).where(
+        ReportPayment.status == "paid", ReportPayment.tester_bypass.is_(False)
+    )) or 0)
+    pdf_revenue_paise = int(db.scalar(select(func.coalesce(func.sum(ReportPayment.amount_paise), 0)).where(
+        ReportPayment.status == "paid", ReportPayment.tester_bypass.is_(False)
+    )) or 0)
     tutor_calls = int(db.scalar(select(func.count(UsageEvent.id)).where(UsageEvent.kind == "tutor", UsageEvent.created_at >= since)) or 0)
     report_calls = int(db.scalar(select(func.count(UsageEvent.id)).where(UsageEvent.kind == "report", UsageEvent.created_at >= since)) or 0)
     latest_users = db.scalars(select(User).order_by(User.created_at.desc()).limit(12)).all()
     latest_reports = db.scalars(select(ReportRecord).order_by(ReportRecord.created_at.desc()).limit(12)).all()
     return {
-        "metrics": {"users": users, "active_7d": active, "reports": reports, "tutor_calls_7d": tutor_calls, "report_calls_7d": report_calls},
+        "metrics": {"users": users, "active_7d": active, "reports": reports, "tutor_calls_7d": tutor_calls, "report_calls_7d": report_calls, "paid_pdf_downloads": paid_pdf_downloads, "pdf_revenue_paise": pdf_revenue_paise},
         "users": [{"id": u.id, "name": u.name, "email": u.email, "role": u.role, "active": u.active, "created_at": u.created_at.isoformat()} for u in latest_users],
         "reports": [{"title": r.title, "pages": r.pages, "user_id": r.user_id, "created_at": r.created_at.isoformat()} for r in latest_reports],
         "system": {"ai_configured": bool(os.getenv("NVIDIA_API_KEY")), "google_configured": bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET")), "database": "postgresql" if "postgresql" in str(db.bind.url) else "sqlite (ephemeral on Render Free)"},
