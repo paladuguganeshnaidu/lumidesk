@@ -342,6 +342,38 @@ def report_job_status(job_id: str, request: Request):
     return public_job(job)
 
 
+@app.get("/api/reports/jobs/{job_id}/quality")
+def report_quality_details(job_id: str, request: Request):
+    user = current_user(request)
+    job = for_user(job_id, user["id"])
+    if not job:
+        raise HTTPException(status_code=404, detail="Report not found or expired.")
+    if job.status != "completed" or not job.quality:
+        raise HTTPException(status_code=409, detail="Visual checks are not finished.")
+    return job.quality
+
+
+@app.get("/api/reports/jobs/{job_id}/preview")
+def report_comparison_preview(job_id: str, request: Request, page: int = 1, kind: str = "generated"):
+    """Protected side-by-side inspection. No generated page is made public."""
+    import pymupdf
+    user = current_user(request)
+    job = for_user(job_id, user["id"])
+    if job is None:
+        raise HTTPException(status_code=404, detail="Report not found or expired.")
+    if job.status != "completed" or not job.result:
+        raise HTTPException(status_code=409, detail="Finish the report before viewing page previews.")
+    if kind not in ("source", "generated"):
+        raise HTTPException(status_code=422, detail="Preview the original or generated page.")
+    pdf_bytes = job.source if kind == "source" else job.result
+    with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if page < 1 or page > len(doc):
+            raise HTTPException(status_code=422, detail="Page number is outside this report.")
+        pix = doc[page-1].get_pixmap(matrix=pymupdf.Matrix(1.15, 1.15), alpha=False)
+        data = pix.tobytes("png")
+    return Response(content=data, media_type="image/png", headers={"Cache-Control":"private, no-store"})
+
+
 @app.get("/api/reports/jobs/{job_id}/download")
 def download_report_job(job_id: str, request: Request, format: str = "pdf"):
     user = current_user(request)
