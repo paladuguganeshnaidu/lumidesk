@@ -239,7 +239,7 @@ async def tutor_response(message: str, level: str = "beginner", style: str = "vi
     # arbitrary parser actions in untrusted model output.
     if not re.match(r"^\s*(flowchart|graph|sequenceDiagram)\b", mermaid):
         mermaid = ""
-    if re.search(r"(?im)^\s*(click|init|%%\{)|<|>|javascript:|https?://", mermaid):
+    if re.search(r"(?im)^\s*(click|init|%%\{)|<\s*[a-z]|javascript:|https?://", mermaid):
         mermaid = ""
     data["mermaid"] = mermaid
     data["research"] = findings
