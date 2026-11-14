@@ -164,11 +164,11 @@
       const message = input.value.trim(); if (message.length < 3) return;
       const welcome = $('.assistant-welcome', chat); welcome?.remove();
       const userBubble = document.createElement('div'); userBubble.className = 'answer-user'; userBubble.textContent = message; chat.append(userBubble);
-      const thinking = document.createElement('div'); thinking.className = 'thinking-row'; thinking.innerHTML = '<span class="thinking-dots"><i></i><i></i><i></i></span> LumiDesk is organizing a clear explanation…'; chat.append(thinking);
+      const thinking = document.createElement('div'); thinking.className = 'thinking-row'; thinking.innerHTML = '<span class="thinking-dots"><i></i><i></i><i></i></span> LumiDesk is building a first-principles lesson and concept map…'; chat.append(thinking);
       const submit = $('button[type="submit"]', form); submit.disabled = true; input.value = '';
       chat.scrollTop = chat.scrollHeight;
       try {
-        const response = await api('/api/tutor', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message, level:$('#learner-level')?.value || 'beginner', style:$('#learning-style')?.value || 'visual'})});
+        const response = await api('/api/tutor', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message, level:$('#learner-level')?.value || 'beginner', style:$('#learning-style')?.value || 'visual', research: Boolean($('#research-enabled')?.checked)})});
         const data = await response.json(); thinking.remove(); renderTutorAnswer(data.result, chat); setUsage('tutor', data.usage.used, data.usage.limit);
       } catch (error) {
         thinking.remove(); const err = document.createElement('div'); err.className='answer-card'; err.innerHTML=`<p>${escapeHTML(error.message)}</p>`; chat.append(err);
@@ -193,9 +193,14 @@
         $$('button', question).forEach(b => b.disabled = true);
         const chosen = Number(button.dataset.option), correct = chosen === Number(q.answer_index);
         button.classList.add(correct ? 'correct' : 'incorrect');
-        const feedback = $('.quiz-feedback', question); if (feedback) feedback.textContent = `${correct ? 'Correct!' : 'Not quite.'} ${q.explanation || ''}`;
+        const feedback = $('.quiz-feedback', question); if (feedback) feedback.textContent = (correct ? 'Correct! ' : `Not quite. Correct answer: ${q.options[Number(q.answer_index)] || 'Review the options'}. `) + (q.explanation || '');
       }));
     });
+    // The dependency-free visualizer always works, even if Mermaid cannot load.
+    $('#tutor-panel')?.classList.add('has-lesson');
+    if (window.LumiLearning && typeof window.LumiLearning.render === 'function') {
+      window.LumiLearning.render(article, data);
+    }
     chat.scrollTop = chat.scrollHeight;
   }
   function initReportStudio() {
