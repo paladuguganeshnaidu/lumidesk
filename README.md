@@ -142,4 +142,4 @@ Stripe may require an invitation and additional verification for merchants based
 
 ## Repository layout
 
-`app/` holds FastAPI endpoints, billing, PDF/Word generators, and frontend assets; `tests/` holds regressions; `scripts/` contains build utilities; `docs/team/` retains historical collaborator credits. Local secret files, virtual environments, rendered PDFs, and cached Python files are excluded from Git.
+`app/` holds FastAPI endpoints, billing, PDF/Word generators, and frontend assets; `tests/` holds regressions; `scripts/` contains build utilities; Git history preserves the removed placeholder root files. Local secret files, virtual environments, rendered PDFs, and cached Python files are excluded from Git.
