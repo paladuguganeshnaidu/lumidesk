@@ -171,6 +171,16 @@ async def tutor_response(message: str, level: str = "beginner", style: str = "vi
         "detail": string(item.get("detail"), 1400),
     } for item in (data.get("steps") if isinstance(data.get("steps"), list) else [])
        if isinstance(item, dict) and item.get("detail")][:9]
+    if not data["steps"] and data["explanation"]:
+        # Preserve an explorable pathway even if a provider returns plain prose
+        # rather than the requested structured JSON. These steps quote the
+        # returned explanation instead of inventing additional facts.
+        passages = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n{2,}", data["explanation"])
+                    if len(part.strip()) >= 25]
+        data["steps"] = [{
+            "title": "Idea " + str(i + 1),
+            "detail": passage[:1100],
+        } for i, passage in enumerate(passages[:6])]
     data["misconceptions"] = [{
         "misconception": string(item.get("misconception"), 340),
         "correction": string(item.get("correction"), 650),
