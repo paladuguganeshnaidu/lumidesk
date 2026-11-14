@@ -209,10 +209,25 @@ def render_replacement_pdf(source: bytes, template: dict, plan: dict) -> tuple[b
                 available=(rect.width+5 if item.get('body')
                            else max(rect.width+6,page.rect.width-start_x-30))
                 if text_width>available+.4 and not item.get('justify'):
-                    raise ValueError(
-                        f"Page {pidx+1}, line {block['block_id']+1}: replacement "
-                        f"exceeds the original {font_size:g} pt line width. "
-                        "Rewrite it more concisely.")
+                    if item.get('body'):
+                        # In a provider-fallback draft, keep the original point
+                        # size and a readable last complete word. Do not shrink
+                        # the type or let characters overlap the right margin.
+                        while text_width>available+.4 and len(text.split())>1:
+                            text=' '.join(text.split()[:-1])
+                            text_width=font.text_length(text,fontsize=target_size)
+                        item['plan_item']['text']=text
+                        warnings.append(
+                            f"Page {pidx+1}, line {block['block_id']+1}: "
+                            "draft body prose shortened to preserve original font and margins; review wording.")
+                        if text_width>available+.4:
+                            raise ValueError(
+                                f"Page {pidx+1}: one long word cannot fit the original line.")
+                    else:
+                        raise ValueError(
+                            f"Page {pidx+1}, line {block['block_id']+1}: replacement "
+                            f"exceeds the original {font_size:g} pt line width. "
+                            "Rewrite it more concisely.")
             original_baseline = block.get('origin', [start_x, rect.y1])
             baseline = float(original_baseline[1])
             # Directly retain the PDF baseline. If shrinking text is necessary,
