@@ -637,6 +637,13 @@ def admin_overview(request: Request, db: Session = Depends(get_db)):
         "metrics": {"users": users, "active_7d": active, "reports": reports, "tutor_calls_7d": tutor_calls, "report_calls_7d": report_calls},
         "users": [{"id": u.id, "name": u.name, "email": u.email, "role": u.role, "active": u.active, "created_at": u.created_at.isoformat()} for u in latest_users],
         "reports": [{"title": r.title, "pages": r.pages, "user_id": r.user_id, "created_at": r.created_at.isoformat()} for r in latest_reports],
+        "database_counts": {
+            "users": users,
+            "usage_events": int(db.scalar(select(func.count(UsageEvent.id))) or 0),
+            "reports": reports,
+            "payment_orders": int(db.scalar(select(func.count(PaymentOrder.id))) or 0),
+            "stripe_events": int(db.scalar(select(func.count(StripeEvent.id))) or 0),
+        },
         "system": {"ai_configured": bool(os.getenv("NVIDIA_API_KEY")), "google_configured": bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET")), "database": "postgresql" if "postgresql" in str(db.bind.url) else "sqlite (ephemeral on Render Free)"},
     }
 
