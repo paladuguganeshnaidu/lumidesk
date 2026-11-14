@@ -50,6 +50,7 @@ class ReportJob:
     detail: str = 'Your report has been queued for generation.'
     done_sections: int = 0
     total_sections: int = 0
+    page_count: int = 0
     result: bytes | None = None
     word_result: bytes | None = None
     quality: dict | None = None
@@ -119,7 +120,7 @@ def public_job(job: ReportJob) -> dict[str, Any]:
         'job_id': job.id, 'status': job.status, 'detail': job.detail, 'mode': job.mode,
         'source_overlap_estimate': job.source_overlap,
         'done_sections': job.done_sections, 'total_sections': job.total_sections,
-        'pages': job.total_sections, 'warnings': job.warnings[:14],
+        'pages': job.page_count, 'warnings': job.warnings[:14],
         'quality': {k:v for k,v in job.quality.items() if k != 'page_checks'} if job.quality else None,
         'overlap_estimate': job.overlap,
         'download_url': f'/api/reports/jobs/{job.id}/download?format=pdf' if job.status == 'completed' else None,
@@ -150,6 +151,7 @@ async def run_job(job: ReportJob) -> None:
             analysis = extract_template_details(template)
             sections = content_slots(template)
             job.total_sections = len(sections)
+            job.page_count = template['page_count']
             parent = jobs.get(job.parent_id) if job.parent_id else None
             if parent and parent.user_id != job.user_id:
                 parent = None
