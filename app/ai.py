@@ -73,7 +73,10 @@ def _json_object(raw: str) -> dict | None:
                 return obj if isinstance(obj, dict) else None
             except (json.JSONDecodeError, ValueError):
                 pass
-    retuasync def tutor_response(message: str, level: str = "beginner", style: str = "visual",
+    return None
+
+
+async def tutor_response(message: str, level: str = "beginner", style: str = "visual",
                          *, research: bool = False) -> dict:
     """First-principles teaching with an always-renderable concept map.
 
@@ -241,7 +244,6 @@ def _json_object(raw: str) -> dict | None:
     data["mermaid"] = mermaid
     data["research"] = findings
     return data
-turn data
 
 
 async def report_plan(*, topic: str, title: str, student: str, institution: str, department: str, guide: str, instructions: str, template: dict) -> dict:
