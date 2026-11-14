@@ -146,7 +146,8 @@ async def test_valid_ai_chunks_are_written_without_fallback(monkeypatch):
 def test_http_job_start_poll_download_regenerate(monkeypatch):
     from app import main as main_module
     monkeypatch.setattr('app.ai._client', lambda: (_ for _ in ()).throw(RuntimeError('provider offline')))
-    monkeypatch.setattr(main_module, 'current_user', lambda request: {'id': 7001, 'active':True})
+    monkeypatch.setenv('STRIPE_TESTER_EMAILS', 'qa-tester@example.com')
+    monkeypatch.setattr(main_module, 'current_user', lambda request: {'id': 7001, 'email': 'qa-tester@example.com', 'active':True})
     monkeypatch.setattr(main_module, 'require_csrf', lambda request: None)
     # On production, CSRF and Google sign-in still run; mock only within tests.
     monkeypatch.setattr('app.report_jobs.record_usage', lambda db,*args,**kw: None)

@@ -25,7 +25,7 @@ from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
 from .ai import AIUnavailable, rewrite_report_pages, tutor_response
-from .db import ReportRecord, UsageEvent, User, daily_count, get_db, init_db, record_usage, upsert_user
+from .db import ReportPayment, ReportRecord, UsageEvent, User, daily_count, get_db, init_db, record_usage, upsert_user
 from .pdf_engine import inspect_pdf, render_replacement_pdf
 from .typography import summarize_typography
 from .report_pipeline import extract_template_details, content_slots, build_plan, extract_approved_reference_context
@@ -33,11 +33,14 @@ from .report_jobs import create_job, for_user, public_job
 from .image_editor import MAX_IMAGE_BYTES, image_slots, normalize_upload, apply_replacements, slot_preview
 from .docx_export import export_editable_docx
 from .security import csrf_token, current_user, require_admin, require_csrf
+from .payments import router as payments_router, has_paid_pdf_access
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 IS_PROD = APP_ENV == "production"
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-change-this-secret-before-deploy")
+if IS_PROD and (len(SECRET_KEY) < 32 or SECRET_KEY == "dev-only-change-this-secret-before-deploy"):
+    raise RuntimeError("Set a strong, random SECRET_KEY in production before starting LumiDesk.")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "30"))
 TUTOR_LIMIT = max(0, int(os.getenv("DAILY_TUTOR_LIMIT", "0")))
 REPORT_LIMIT = max(0, int(os.getenv("DAILY_REPORT_LIMIT", "0")))
@@ -52,6 +55,7 @@ app = FastAPI(title="LumiDesk AI", version="1.0.0", docs_url=None if IS_PROD els
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, session_cookie="lumidesk_session", same_site="lax", https_only=IS_PROD, max_age=60 * 60 * 12)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+app.include_router(payments_router)
 
 
 oauth = OAuth() if OAuth else None
@@ -298,7 +302,7 @@ def report_job_status(job_id: str, request: Request):
 
 
 @app.get("/api/reports/jobs/{job_id}/download")
-def download_report_job(job_id: str, request: Request, format: str = "pdf"):
+def download_report_job(job_id: str, request: Request, format: str = "pdf", db: Session = Depends(get_db)):
     user = current_user(request)
     job = for_user(job_id, user["id"])
     if job is None:
@@ -307,6 +311,8 @@ def download_report_job(job_id: str, request: Request, format: str = "pdf"):
         raise HTTPException(status_code=422, detail="Choose PDF or Word (.docx).")
     if job.status != "completed" or not job.result:
         raise HTTPException(status_code=409, detail="The report has not finished generating.")
+    if format == "pdf" and not has_paid_pdf_access(db, user, job_id):
+        raise HTTPException(status_code=402, detail="Pay ₹10 to download this PDF. Tester accounts on the server allowlist are exempt.")
     content = job.result if format == "pdf" else job.word_result
     if not content:
         raise HTTPException(status_code=409, detail="The Word export is not available for this report. Download the PDF instead.")
@@ -453,59 +459,14 @@ async def regenerate_report_job(
 
 
 @app.post("/api/reports/generate")
-async def api_generate_report(
-    request: Request,
-    file: UploadFile = File(...),
-    title: str = Form(..., min_length=4, max_length=180),
-    topic: str = Form(..., min_length=20, max_length=3000),
-    student_name: str = Form(..., min_length=2, max_length=140),
-    usn: str = Form(..., min_length=2, max_length=32),
-    db: Session = Depends(get_db),
-):
+async def api_generate_report(request: Request):
+    """Retired synchronous endpoint; all exports now use owned report jobs and billing."""
     require_csrf(request)
-    user = current_user(request)
-    used = daily_count(db, user["id"], "report")
-    if REPORT_LIMIT > 0 and used >= REPORT_LIMIT:
-        raise HTTPException(status_code=429, detail="You have reached the configured daily report limit.")
-    title, topic, student_name, usn = title.strip(), topic.strip(), student_name.strip(), usn.strip()
-    if not all((title, topic, student_name, usn)):
-        raise HTTPException(status_code=422, detail="Enter your project title, what it does, your name, and your USN or registration number.")
-    source = await _read_report_upload(file)
-    template = _read_template(source)
-    analysis = extract_template_details(template)
-    sections = content_slots(template)
-    if not sections:
-        raise HTTPException(status_code=422, detail="This PDF has no clearly identifiable body sections to rewrite. Try a text-based report with section headings.")
-    try:
-        # Chunked section-level writing uses bounded retries, not one enormous
-        # prompt that can truncate and leave the document half rewritten.
-        generated_pages = await asyncio.wait_for(rewrite_report_pages(title=title, topic=topic, sections=sections), timeout=155)
-        plan = build_plan(template, analysis, title, student_name, usn, generated_pages)
-        if plan["rewritten_body_slots"] != plan["planned_body_slots"] or plan["rejected_ai_slots"]:
-            raise ValueError("A report section was incomplete or exceeded its original line lengths. Please retry with a clearer topic description.")
-        output, fit_warnings = render_replacement_pdf(source, template, plan)
-    except AIUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(status_code=504, detail="The report needs more generation time than this free server allows. Try a shorter template or retry.") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        logging.exception("Template-aware report generation failed")
-        raise HTTPException(status_code=502, detail="The report could not be completed and verified. No incomplete PDF was returned; please retry.") from exc
-    record = ReportRecord(user_id=user["id"], title=title, pages=template["page_count"], status="completed")
-    db.add(record)
-    record_usage(db, user["id"], "report", title)
-    db.commit()
-    safe_name = "".join(c for c in title if c.isalnum() or c in " -_").strip().replace(" ", "_")[:50] or "Student_Report"
-    import urllib.parse, json
-    warnings = analysis["warnings"] + ["Any original references must be replaced with verified sources for the new topic; draft certification and declarations require authorization."] + fit_warnings
-    headers = {"Content-Disposition": f'attachment; filename="{safe_name}_LumiDesk.pdf"',
-               "X-Report-Warnings": str(len(warnings)),
-               "X-Report-Warning-Details": urllib.parse.quote(json.dumps(warnings[:12], ensure_ascii=False))}
-    return Response(content=output, media_type="application/pdf", headers=headers)
-
-
+    current_user(request)
+    raise HTTPException(
+        status_code=410,
+        detail="The synchronous PDF export endpoint is retired. Use /api/reports/start and the paid report download flow.",
+    )
 @app.get("/api/student/overview")
 def student_overview(request: Request, db: Session = Depends(get_db)):
     user = current_user(request)
@@ -525,12 +486,18 @@ def admin_overview(request: Request, db: Session = Depends(get_db)):
     users = int(db.scalar(select(func.count(User.id))) or 0)
     active = int(db.scalar(select(func.count(User.id)).where(User.last_login >= since)) or 0)
     reports = int(db.scalar(select(func.count(ReportRecord.id))) or 0)
+    paid_pdf_downloads = int(db.scalar(select(func.count(ReportPayment.id)).where(
+        ReportPayment.status == "paid", ReportPayment.tester_bypass.is_(False)
+    )) or 0)
+    pdf_revenue_paise = int(db.scalar(select(func.coalesce(func.sum(ReportPayment.amount_paise), 0)).where(
+        ReportPayment.status == "paid", ReportPayment.tester_bypass.is_(False)
+    )) or 0)
     tutor_calls = int(db.scalar(select(func.count(UsageEvent.id)).where(UsageEvent.kind == "tutor", UsageEvent.created_at >= since)) or 0)
     report_calls = int(db.scalar(select(func.count(UsageEvent.id)).where(UsageEvent.kind == "report", UsageEvent.created_at >= since)) or 0)
     latest_users = db.scalars(select(User).order_by(User.created_at.desc()).limit(12)).all()
     latest_reports = db.scalars(select(ReportRecord).order_by(ReportRecord.created_at.desc()).limit(12)).all()
     return {
-        "metrics": {"users": users, "active_7d": active, "reports": reports, "tutor_calls_7d": tutor_calls, "report_calls_7d": report_calls},
+        "metrics": {"users": users, "active_7d": active, "reports": reports, "tutor_calls_7d": tutor_calls, "report_calls_7d": report_calls, "paid_pdf_downloads": paid_pdf_downloads, "pdf_revenue_paise": pdf_revenue_paise},
         "users": [{"id": u.id, "name": u.name, "email": u.email, "role": u.role, "active": u.active, "created_at": u.created_at.isoformat()} for u in latest_users],
         "reports": [{"title": r.title, "pages": r.pages, "user_id": r.user_id, "created_at": r.created_at.isoformat()} for r in latest_reports],
         "system": {"ai_configured": bool(os.getenv("NVIDIA_API_KEY")), "google_configured": bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET")), "database": "postgresql" if "postgresql" in str(db.bind.url) else "sqlite (ephemeral on Render Free)"},

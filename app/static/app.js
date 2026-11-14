@@ -218,6 +218,39 @@
       const bar = $('#report-progress-fill');
       if (bar && job.total_sections) bar.style.width = `${Math.round((job.done_sections || 0) / job.total_sections * 100)}%`;
     }
+    async function ensurePdfPurchase(jobId) {
+      const response = await api(`/api/billing/checkout/${encodeURIComponent(jobId)}`, {method:'POST'});
+      const payment = await response.json();
+      if (payment.checkout_url) {
+        try { sessionStorage.setItem('lumidesk_report_job', jobId); } catch {}
+        window.location.assign(payment.checkout_url);
+        return false;
+      }
+      if (!payment.paid) throw new Error(payment.processing ?
+        'Your payment is still being confirmed. Refresh this page in a moment.' :
+        'Payment is required before downloading this PDF.');
+      return true;
+    }
+    async function completePaymentReturn(job) {
+      const params = new URLSearchParams(location.search);
+      if (params.get('payment') !== 'success' || params.get('job_id') !== job.job_id) return;
+      let verified = false;
+      for (let attempt = 0; attempt < 24; attempt++) {
+        try {
+          const response = await api(`/api/billing/status/${encodeURIComponent(job.job_id)}`);
+          const state = await response.json();
+          if (state.paid) { verified = true; break; }
+        } catch {}
+        await sleep(1500);
+      }
+      history.replaceState({}, document.title, '/app?tab=reports');
+      if (verified) {
+        toast('Payment confirmed. Your PDF is downloading.');
+        await downloadFormat('pdf');
+      } else {
+        showError('Stripe returned you to LumiDesk, but payment confirmation is still pending. Wait a moment, then click Pay ₹10 & download PDF again.');
+      }
+    }
     async function downloadFormat(format) {
       if (!latestCompletedJob || !['pdf','docx'].includes(format)) {
         showError('Finish generating a report before downloading.'); return;
@@ -225,6 +258,7 @@
       const url = latestCompletedJob.downloads?.[format];
       if (!url) { showError(`${format.toUpperCase()} is not available for this report.`);return; }
       try {
+        if (format === 'pdf' && !(await ensurePdfPurchase(latestCompletedJob.job_id))) return;
         const response = await api(url);
         const blob = await response.blob();
         if (blob.size < 100) throw new Error('The generated document is unexpectedly small.');
@@ -260,7 +294,8 @@
       if ($('#regen-name') && name) $('#regen-name').value = name.value;
       if ($('#regen-usn') && usn) $('#regen-usn').value = usn.value;
       await refreshStudentOverview();
-      toast('Your report is ready. Choose PDF and Word to download both files.');
+      toast('Your report is ready. PDF downloads cost ₹10; Word downloads are free.');
+      await completePaymentReturn(job);
     }
     async function waitForJob(jobId) {
       latestJobId = jobId;
@@ -465,6 +500,7 @@
         const next = await response.json();showProgress(true,next);
         if (next.status === 'failed') throw Error(next.error || 'Generation failed.');
         if (next.status === 'completed') {
+          try { sessionStorage.setItem('lumidesk_report_job', jobId); } catch {}
           job = next;result.classList.remove('hidden');
           const overlap = next.source_overlap_estimate == null ? '' : ` Estimated body-text overlap against the reference: ${(next.source_overlap_estimate*100).toFixed(1)}% (not a plagiarism score).`;
           $('#approved-result-copy').textContent = `The report is ready to review.${overlap} Verify images, citations, dates and approval pages. ${next.warnings?.slice(0,2).join(' ') || ''}`;
@@ -480,6 +516,13 @@
     async function retrieve(format) {
       if (!job?.downloads?.[format]) {reportError(`${format.toUpperCase()} is not available yet.`);return;}
       try {
+        if (format === 'pdf') {
+          try { sessionStorage.setItem('lumidesk_report_job', job.job_id); } catch {}
+          const paymentResponse = await api(`/api/billing/checkout/${encodeURIComponent(job.job_id)}`, {method:'POST'});
+          const payment = await paymentResponse.json();
+          if (payment.checkout_url) { window.location.assign(payment.checkout_url); return; }
+          if (!payment.paid) throw Error(payment.processing ? 'Payment confirmation is still pending. Refresh shortly.' : 'Pay ₹10 before downloading this PDF.');
+        }
         const resp = await api(job.downloads[format]);const blob = await resp.blob();
         if (blob.size<100) throw Error('Generated file is unexpectedly small.');
         const url=URL.createObjectURL(blob);
@@ -526,6 +569,13 @@
     async function getFile(format) {
       if (busy) return;
       try {
+        if (format === 'pdf') {
+          try { sessionStorage.setItem('lumidesk_report_job', jobId); } catch {}
+          const paymentResponse = await api(`/api/billing/checkout/${encodeURIComponent(jobId)}`, {method:'POST'});
+          const payment = await paymentResponse.json();
+          if (payment.checkout_url) { window.location.assign(payment.checkout_url); return; }
+          if (!payment.paid) throw Error(payment.processing ? 'Payment confirmation is still pending. Refresh shortly.' : 'Pay ₹10 before downloading this PDF.');
+        }
         const response = await api(`/api/reports/jobs/${encodeURIComponent(jobId)}/download?format=${format}`);
         const blob = await response.blob();
         const url = URL.createObjectURL(blob), a = document.createElement('a');
@@ -627,7 +677,8 @@
   let adminData = null;
   function renderAdmin(data) {
     adminData=data; const m=data.metrics;
-    [['metric-users',m.users],['metric-active',m.active_7d],['metric-reports',m.reports],['metric-tutor',m.tutor_calls_7d]].forEach(([id,v])=>{const el=$(`#${id}`);if(el)el.textContent=Number(v||0).toLocaleString();});
+    [['metric-users',m.users],['metric-active',m.active_7d],['metric-reports',m.reports],['metric-tutor',m.tutor_calls_7d],['metric-paid-pdfs',m.paid_pdf_downloads]].forEach(([id,v])=>{const el=$(`#${id}`);if(el)el.textContent=Number(v||0).toLocaleString();});
+    const revenue=$('#metric-pdf-revenue');if(revenue)revenue.textContent=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(Number(m.pdf_revenue_paise||0)/100);
     setStatus('google-status',data.system.google_configured);setStatus('ai-status',data.system.ai_configured);
     const db=$('#db-status');if(db){db.textContent=data.system.database.includes('ephemeral')?'SQLITE · TEMPORARY':'POSTGRESQL';db.className=data.system.database.includes('ephemeral')?'status-missing':'status-ok';}
     const userRows=data.users.map(u=>`<tr><td><strong>${escapeHTML(u.name)}</strong></td><td>${escapeHTML(u.email)}</td><td><span class="role-tag">${escapeHTML(u.role)}</span></td><td><span class="status-tag ${u.active?'status-active':'status-disabled'}">${u.active?'ACTIVE':'DISABLED'}</span></td><td>${formatDate(u.created_at)}</td></tr>`).join('') || '<tr><td colspan="4" class="table-loading">No students yet.</td></tr>';

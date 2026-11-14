@@ -44,13 +44,47 @@ Open `http://127.0.0.1:8000`.
 | `NVIDIA_BASE_URL` | No | Defaults to `https://integrate.api.nvidia.com/v1` |
 | `NVIDIA_MODEL` | No | Defaults to `nvidia/nemotron-3.5-lightning-30b-a3b` |
 | `ADMIN_EMAILS` | Yes for admin | Comma-separated, verified Google email allowlist |
-| `DATABASE_URL` | Strongly recommended | PostgreSQL URL for durable user and activity data |
+| `DATABASE_URL` | Strongly recommended | PostgreSQL URL for durable user, report and payment data |
+| `STRIPE_SECRET_KEY` | Required for paid PDF downloads | Stripe test secret key (`sk_test_...`) during testing; keep it in Render secrets |
+| `STRIPE_WEBHOOK_SECRET` | Required for payment confirmation | Signing secret for the Stripe webhook endpoint `/api/stripe/webhook` |
+| `STRIPE_LIVE_PAYMENTS_ENABLED` | No | Keep `false` until sandbox checkout, webhook and PDF delivery tests pass |
+| `STRIPE_TESTER_EMAILS` | No | Comma-separated verified Google emails allowed to download PDFs without payment |
+| `PUBLIC_BASE_URL` | Required on Render | Exact public HTTPS URL used for Stripe success and cancel redirects |
 | `MAX_UPLOAD_MB` | No | PDF upload cap; defaults to 15 MB |
 | `DAILY_TUTOR_LIMIT` | No | Per-account rolling 24-hour tutor cap; defaults to 35 |
 | `DAILY_REPORT_LIMIT` | No | Per-account rolling 24-hour report cap; defaults to 3 |
 | `APP_ENV` | Yes in production | Set to `production` to enable secure cookies and HSTS |
 
 Never commit `.env` or API credentials. Put secrets in Render's environment settings.
+
+## Paid PDF downloads (Stripe)
+
+LumiDesk charges **₹10 per generated PDF**. The Word (.docx) export remains free. Payment is attached to one report job and also covers updated PDF downloads after image edits to that same job.
+
+### Render environment
+
+1. Set `DATABASE_URL` to a durable PostgreSQL database. Payment records and webhook entitlements must survive restarts.
+2. Set `STRIPE_SECRET_KEY` to a Stripe **test** secret key (`sk_test_...`) and `STRIPE_LIVE_PAYMENTS_ENABLED=false`.
+3. Set `STRIPE_TESTER_EMAILS` to a comma-separated allowlist of verified Google email addresses. Only those server-configured accounts bypass the fee; no browser flag or query parameter can grant this.
+4. Set `PUBLIC_BASE_URL` to the exact HTTPS origin of the Render service, without a trailing slash.
+5. Add a Stripe webhook endpoint at `https://YOUR-SERVICE.onrender.com/api/stripe/webhook`. Subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, and `checkout.session.expired`. Copy its signing secret into `STRIPE_WEBHOOK_SECRET`.
+
+### Payment security
+
+The amount is fixed on the server at 1000 paise (₹10); the browser cannot supply or change it. The app omits a hard-coded `payment_method_types` list so Stripe Dashboard dynamic payment methods can select only the methods enabled and eligible for the connected account, currency, transaction amount and customer location. Configure methods in Stripe Dashboard and test the exact methods your account can use. Never put the Stripe secret or webhook signing secret in frontend code or Git.
+
+The download route requires a matching, server-recorded paid entitlement for the signed-in user and report job. Checkout success redirects are not proof of payment: the app grants access only after a valid signed webhook or a server-side Stripe Session retrieval confirms a paid INR 10 Session with matching metadata. Duplicate webhook delivery is safe. Test with Stripe test credentials before enabling live payments.
+
+### Live launch checklist
+
+- Complete a successful test payment and a failed/cancelled payment.
+- Verify that an ordinary user cannot download a PDF before payment or another user's PDF.
+- Verify that only the configured tester Google accounts bypass payment.
+- Confirm all enabled payment methods complete and trigger a successful webhook.
+- Confirm the webhook URL and `PUBLIC_BASE_URL` use HTTPS.
+- Only then set `STRIPE_SECRET_KEY` to the live key and `STRIPE_LIVE_PAYMENTS_ENABLED=true`.
+
+**Storage note:** report PDFs remain in the current in-memory job store and expire after one hour or a Render restart. Stripe payment records are durable in PostgreSQL, but the PDF itself can still be lost when the process restarts. Before relying on long-term paid download guarantees, move generated artifacts to durable private object storage (for example, S3 or Cloudflare R2) and serve them through authenticated, short-lived downloads.
 
 ## Google OAuth setup
 

@@ -60,7 +60,8 @@ def test_reference_reads_original_topic_and_ignores_student_identity():
 
 def test_separate_consent_and_result_with_14_page_pdf(monkeypatch):
     from app import main
-    monkeypatch.setattr(main, 'current_user', lambda req: {'id': 9033, 'active': True})
+    monkeypatch.setenv('STRIPE_TESTER_EMAILS', 'qa-tester@example.com')
+    monkeypatch.setattr(main, 'current_user', lambda req: {'id': 9033, 'email': 'qa-tester@example.com', 'active': True})
     monkeypatch.setattr(main, 'require_csrf', lambda req: None)
     monkeypatch.setattr('app.ai._client', lambda: (_ for _ in ()).throw(RuntimeError('provider not available')))
     monkeypatch.setattr('app.report_jobs.record_usage', lambda db,*args,**kw: None)

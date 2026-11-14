@@ -60,7 +60,8 @@ def test_70_page_word_export_has_text_on_last_page():
 def test_api_word_pdf_downloads_and_typography(monkeypatch):
     from app import main as m
     from app import report_jobs
-    monkeypatch.setattr(m,'current_user',lambda request:{'id':2001,'active':True})
+    monkeypatch.setenv('STRIPE_TESTER_EMAILS', 'qa-tester@example.com')
+    monkeypatch.setattr(m,'current_user',lambda request:{'id':2001,'email':'qa-tester@example.com','active':True})
     monkeypatch.setattr(m,'require_csrf',lambda request:None)
     monkeypatch.setattr(report_jobs,'SessionLocal',lambda: (_ for _ in ()).throw(RuntimeError('mock DB')))
     monkeypatch.setattr('app.ai._client',lambda: (_ for _ in ()).throw(RuntimeError('test offline AI')))

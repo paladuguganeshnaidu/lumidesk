@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, create_engine, func, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -55,6 +55,28 @@ class ReportRecord(Base):
     pages: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(30), default="completed")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class ReportPayment(Base):
+    """One current payment attempt/entitlement per generated report job."""
+    __tablename__ = "report_payments"
+    __table_args__ = (UniqueConstraint("report_job_id", name="uq_report_payments_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    report_job_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    stripe_session_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="creating", index=True)
+    amount_paise: Mapped[int] = mapped_column(Integer, default=1000)
+    currency: Mapped[str] = mapped_column(String(3), default="inr")
+    tester_bypass: Mapped[bool] = mapped_column(Boolean, default=False)
+    stripe_livemode: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 def init_db() -> None:
