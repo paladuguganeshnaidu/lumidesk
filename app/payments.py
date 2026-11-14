@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -69,6 +68,8 @@ def _stripe_credentials() -> tuple[object, str, bool]:
 def _public_base_url(request: Request) -> str:
     configured = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
     if configured:
+        if os.getenv("APP_ENV", "development").lower() == "production" and not configured.startswith("https://"):
+            raise HTTPException(status_code=503, detail="PUBLIC_BASE_URL must use HTTPS in production.")
         return configured
     if os.getenv("APP_ENV", "development").lower() == "production":
         raise HTTPException(status_code=503, detail="Set PUBLIC_BASE_URL to your HTTPS Render service URL.")
@@ -97,6 +98,8 @@ def _mark_paid(db: Session, payment: ReportPayment, session, *, live_mode: bool)
         or str(_value(session, "currency", "")).lower() != PDF_CURRENCY
         or bool(_value(session, "livemode", False)) != live_mode
         or str(metadata.get("purpose", "")) != "report_pdf_download"
+        or str(metadata.get("amount_paise", "")) != str(PDF_PRICE_PAISE)
+        or str(metadata.get("currency", "")).lower() != PDF_CURRENCY
         or str(metadata.get("report_job_id", "")) != payment.report_job_id
         or str(metadata.get("user_id", "")) != str(payment.user_id)
         or str(_value(session, "client_reference_id", "")) != str(payment.user_id)
@@ -141,25 +144,15 @@ def create_pdf_checkout(job_id: str, request: Request, db: Session = Depends(get
         ).with_for_update()
     )
 
-    if is_tester_email(user.get("email")):
-        if payment is None:
-            payment = ReportPayment(
-                user_id=user["id"], report_job_id=job_id, status="paid",
-                amount_paise=0, currency=PDF_CURRENCY, tester_bypass=True,
-                paid_at=datetime.now(timezone.utc),
-            )
-            db.add(payment)
-        else:
-            payment.status = "paid"
-            payment.amount_paise = 0
-            payment.currency = PDF_CURRENCY
-            payment.tester_bypass = True
-            payment.paid_at = payment.paid_at or datetime.now(timezone.utc)
-        db.commit()
-        return _checkout_response(payment, paid=True)
-
+    # Never replace a real payment record with a tester bypass marker.
     if payment and payment.status == "paid" and has_paid_pdf_access(db, user, job_id):
         return _checkout_response(payment, paid=True)
+
+    # Tester exemption is evaluated only from the Render-side allowlist;
+    # it is not persisted as an entitlement that would survive allowlist removal.
+    if is_tester_email(user.get("email")):
+        return {"paid": True, "bypass": True, "checkout_url": None,
+                "status": "paid", "amount_paise": 0, "currency": PDF_CURRENCY}
 
     stripe, secret, live_mode = _stripe_credentials()
 
@@ -207,7 +200,8 @@ def create_pdf_checkout(job_id: str, request: Request, db: Session = Depends(get
     elif payment.status == "creating":
         # A concurrent request may be creating a session. Stripe idempotency
         # makes a retry safe if the previous request lost its response.
-        if payment.created_at and (datetime.now(timezone.utc) - payment.created_at.replace(tzinfo=timezone.utc)).total_seconds() < 90:
+        last_change = payment.updated_at or payment.created_at
+        if last_change and (datetime.now(timezone.utc) - last_change.replace(tzinfo=timezone.utc)).total_seconds() < 90:
             raise HTTPException(status_code=409, detail="Checkout is being prepared. Please retry in a few seconds.")
     else:
         raise HTTPException(status_code=409, detail="Payment is already being processed. Refresh the page shortly.")
