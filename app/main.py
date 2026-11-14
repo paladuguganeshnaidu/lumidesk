@@ -33,7 +33,7 @@ from .report_jobs import create_job, for_user, public_job
 from .image_editor import MAX_IMAGE_BYTES, image_slots, normalize_upload, apply_replacements, slot_preview
 from .docx_export import export_editable_docx
 from .security import csrf_token, current_user, require_admin, require_csrf
-from .billing import configuration as billing_configuration, price_info as billing_price_info, create_checkout, handle_webhook, history as billing_history
+from .billing import price_info as billing_price_info, create_checkout, handle_webhook, history as billing_history
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_ENV = os.getenv("APP_ENV", "development").lower()
