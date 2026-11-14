@@ -162,9 +162,9 @@ async def tutor_response(message: str, level: str = "beginner", style: str = "vi
     data["explanation"] = string(data.get("explanation"), 14000)
     for field in ("analogy", "example", "practice_challenge"):
         data[field] = string(data.get(field), 1800)
-    data["key_points"] = [string(p, 360) for p in (data.get("key_points") or [])
+    data["key_points"] = [string(p, 360) for p in (data.get("key_points") if isinstance(data.get("key_points"), list) else [])
                           if isinstance(p, str) and p.strip()][:8]
-    data["prerequisites"] = [string(p, 180) for p in (data.get("prerequisites") or [])
+    data["prerequisites"] = [string(p, 180) for p in (data.get("prerequisites") if isinstance(data.get("prerequisites"), list) else [])
                              if isinstance(p, str) and p.strip()][:6]
     data["steps"] = [{
         "title": string(item.get("title"), 140),
@@ -228,7 +228,7 @@ async def tutor_response(message: str, level: str = "beginner", style: str = "vi
         if not isinstance(edge, dict):
             continue
         start, end = edge.get("from"), edge.get("to")
-        if start in valid_ids and end in valid_ids and start != end:
+        if isinstance(start, str) and isinstance(end, str) and start in valid_ids and end in valid_ids and start != end:
             edges.append({"from": start, "to": end, "label": string(edge.get("label"), 80)})
     if not edges and len(nodes) > 1:
         edges = [{"from": nodes[i]["id"], "to": nodes[i+1]["id"], "label": ""}
