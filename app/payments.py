@@ -50,6 +50,8 @@ def has_paid_pdf_access(db: Session, user: dict, job_id: str) -> bool:
 def _stripe_credentials() -> tuple[object, str, bool]:
     secret = os.getenv("STRIPE_SECRET_KEY", "").strip()
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+    if not webhook_secret:
+        raise HTTPException(status_code=503, detail="Set STRIPE_WEBHOOK_SECRET and configure the Stripe webhook before accepting payments.")
     if not secret.startswith(("sk_test_", "sk_live_")):
         raise HTTPException(status_code=503, detail="Stripe is not configured. Add STRIPE_SECRET_KEY in Render.")
     live_mode = secret.startswith("sk_live_")
