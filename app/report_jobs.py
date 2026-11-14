@@ -54,6 +54,8 @@ class ReportJob:
     result: bytes | None = None
     word_result: bytes | None = None
     quality: dict | None = None
+    ai_lines: int = 0
+    fallback_lines: int = 0
     base_result: bytes | None = None  # unmodified generated PDF for reversible image edits
     image_edits: dict[str, bytes] = field(default_factory=dict)
     edit_busy: bool = False
@@ -122,6 +124,7 @@ def public_job(job: ReportJob) -> dict[str, Any]:
         'done_sections': job.done_sections, 'total_sections': job.total_sections,
         'pages': job.page_count, 'warnings': job.warnings[:14],
         'quality': {k:v for k,v in job.quality.items() if k != 'page_checks'} if job.quality else None,
+        'ai_lines': job.ai_lines, 'fallback_lines': job.fallback_lines,
         'overlap_estimate': job.overlap,
         'download_url': f'/api/reports/jobs/{job.id}/download?format=pdf' if job.status == 'completed' else None,
         'downloads': {
@@ -219,6 +222,10 @@ async def run_job(job: ReportJob) -> None:
                     if job.source_overlap > .30:
                         job.warnings.append('Estimated original-reference overlap exceeds 30%. This is not a plagiarism score; review and write from your own evidence.')
                 job.warnings.append('A reference file is not evidence of your own work. Replace photos and verify all citations, dates, outcomes and faculty approval.')
+            job.fallback_lines = sum(int(p.get('fallback_count', 0)) for p in generated)
+            job.ai_lines = max(0, sum(len(p['slots']) for p in sections) - job.fallback_lines)
+            if sections and not job.ai_lines:
+                job.warnings.insert(0, 'AI MODEL DID NOT PROVIDE CONTENT. This is an offline draft with placeholder-style prose; review and rewrite before submission.')
             job.detail = 'Fitting replacement text into the existing PDF layout…'
             plan = build_plan(template, analysis, job.title, job.student_name, job.usn, generated,
                               preserve_references=True)
@@ -269,8 +276,14 @@ async def run_job(job: ReportJob) -> None:
             job.status = 'failed'
             job.error = 'The server interrupted generation. Please restart using the source PDF.'
             raise
+        except LayoutQualityError as exc:
+            logging.warning('Visual QA blocked report %s: %s', job.id, exc)
+            job.status = 'failed'
+            job.error = str(exc)[:350] + ' The PDF was not released because its template layout changed.'
+            job.detail = 'Visual comparison found a layout mismatch.'
         except Exception as exc:
             logging.exception('Background report generation failed: %s', job.id)
             job.status = 'failed'
-            job.error = 'This PDF could not be safely processed. Try an unlocked, selectable-text PDF.'
+            job.error = ('PDF could not be safely processed. Ensure it is unlocked, has selectable text, '
+                         'and fits within 70 pages / the upload size limit.')
             job.detail = f'Generation stopped: {type(exc).__name__}'
