@@ -46,6 +46,15 @@ def _plan_group(group: list[dict], font) -> list[str] | None:
     targets = [row['block']['rect'][2] - row['block']['rect'][0] for row in group]
     sizes = [float(row['block']['font_size']) for row in group]
     orig_word_counts = [max(1, len(row['block']['text'].split())) for row in group]
+    # Cache the source font glyph widths. This keeps 70-page wrap searches fast.
+    widths_by_size={}
+    space_by_size={}
+    for size in set(sizes):
+        prefix=[0.0]
+        for word in words:
+            prefix.append(prefix[-1]+font.text_length(word,fontsize=size))
+        widths_by_size[size]=prefix
+        space_by_size[size]=font.text_length(' ',fontsize=size)
 
     @lru_cache(None)
     def best(i: int, pos: int):
@@ -62,14 +71,14 @@ def _plan_group(group: list[dict], font) -> list[str] | None:
         result = (float('inf'), ())
         for k in range(lo,hi+1):
             phrase = ' '.join(words[pos:pos+k])
-            natural = font.text_length(phrase, fontsize=sizes[i])
+            glyphs=widths_by_size[sizes[i]][pos+k]-widths_by_size[sizes[i]][pos]
+            usual=space_by_size[sizes[i]]
+            natural=glyphs+usual*(k-1)
             target = targets[i]
             full = i < len(group)-1 and target > .9*max(targets)
             if full:
-                word_width = sum(font.text_length(w,fontsize=sizes[i]) for w in words[pos:pos+k])
                 spaces=k-1
-                usual=font.text_length(' ',fontsize=sizes[i])
-                spacing=(target-word_width)/max(1,spaces)
+                spacing=(target-glyphs)/max(1,spaces)
                 if spaces<2 or spacing < .65*usual or spacing > 3.0*usual:
                     continue
                 width_penalty=abs(spacing/usual-1)*.5
