@@ -375,7 +375,7 @@ async def rewrite_report_pages(*, title: str, topic: str, sections: list[dict],
                     for attempt in range(2):
                         try:
                             answer = await asyncio.wait_for(_completion(
-                                messages=[{'role': 'system', 'content': prompt},
+                                client, messages=[{'role': 'system', 'content': prompt},
                                           {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}],
                                 temperature=min(.8, .32 + variant_seed * .13 + attempt * .06),
                                 max_tokens=2400
