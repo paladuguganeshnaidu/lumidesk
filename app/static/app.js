@@ -677,7 +677,8 @@
   let adminData = null;
   function renderAdmin(data) {
     adminData=data; const m=data.metrics;
-    [['metric-users',m.users],['metric-active',m.active_7d],['metric-reports',m.reports],['metric-tutor',m.tutor_calls_7d]].forEach(([id,v])=>{const el=$(`#${id}`);if(el)el.textContent=Number(v||0).toLocaleString();});
+    [['metric-users',m.users],['metric-active',m.active_7d],['metric-reports',m.reports],['metric-tutor',m.tutor_calls_7d],['metric-paid-pdfs',m.paid_pdf_downloads]].forEach(([id,v])=>{const el=$(`#${id}`);if(el)el.textContent=Number(v||0).toLocaleString();});
+    const revenue=$('#metric-pdf-revenue');if(revenue)revenue.textContent=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(Number(m.pdf_revenue_paise||0)/100);
     setStatus('google-status',data.system.google_configured);setStatus('ai-status',data.system.ai_configured);
     const db=$('#db-status');if(db){db.textContent=data.system.database.includes('ephemeral')?'SQLITE · TEMPORARY':'POSTGRESQL';db.className=data.system.database.includes('ephemeral')?'status-missing':'status-ok';}
     const userRows=data.users.map(u=>`<tr><td><strong>${escapeHTML(u.name)}</strong></td><td>${escapeHTML(u.email)}</td><td><span class="role-tag">${escapeHTML(u.role)}</span></td><td><span class="status-tag ${u.active?'status-active':'status-disabled'}">${u.active?'ACTIVE':'DISABLED'}</span></td><td>${formatDate(u.created_at)}</td></tr>`).join('') || '<tr><td colspan="4" class="table-loading">No students yet.</td></tr>';
