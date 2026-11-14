@@ -115,3 +115,27 @@ def test_analyzer_accepts_pdf_with_short_header_preamble(monkeypatch):
         result = response.json()
         assert result["page_count"] == 14
         assert result["editable_line_count"] > 0
+
+
+def test_pdf_side_by_side_previews_are_owner_scoped(monkeypatch):
+    from app import main
+    from app.report_jobs import ReportJob, jobs
+    source = make_document(pages=2, familiar=False)
+    record = ReportJob(id="test_quality_preview", user_id=1001, source=source,
+                       title="Sample", topic="Preview", student_name="Student", usn="USN",
+                       status="completed", result=source, quality={"status":"passed","pages_checked":2})
+    jobs[record.id] = record
+    monkeypatch.setattr(main, "current_user", lambda _: {"id": 1001, "active": True})
+    with TestClient(app) as client:
+        source_response = client.get("/api/reports/jobs/test_quality_preview/preview?page=2&kind=source")
+        output_response = client.get("/api/reports/jobs/test_quality_preview/preview?page=2&kind=generated")
+        assert source_response.status_code == 200
+        assert output_response.status_code == 200
+        assert source_response.headers["content-type"].startswith("image/png")
+        assert source_response.content.startswith(b"\x89PNG")
+        assert client.get("/api/reports/jobs/test_quality_preview/preview?page=3").status_code == 422
+        assert client.get("/api/reports/jobs/test_quality_preview/quality").json()["pages_checked"] == 2
+        monkeypatch.setattr(main, "current_user", lambda _: {"id": 2002, "active": True})
+        assert client.get("/api/reports/jobs/test_quality_preview/quality").status_code == 404
+        assert client.get("/api/reports/jobs/test_quality_preview/preview").status_code == 404
+    jobs.clear()
