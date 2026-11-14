@@ -34,6 +34,29 @@
     catch { return '—'; }
   };
 
+  function showPdfComparison(job, id) {
+    const box = document.getElementById(id);
+    if (!box || !job?.job_id) return;
+    const total = Math.max(1, Number(job.quality?.pages_checked || job.pages || 1));
+    const verdict = box.querySelector('[data-preview-status]');
+    verdict.textContent = job.quality?.status === 'passed'
+      ? 'Automatic visual check passed across all ' + total + ' pages outside the rewritten text. Review your new wording and sources.'
+      : 'This report does not have a completed visual QA result.';
+    let current = 1;
+    function render() {
+      box.querySelector('[data-preview-number]').textContent = 'Page ' + current + ' / ' + total;
+      const base = '/api/reports/jobs/' + encodeURIComponent(job.job_id) + '/preview?page=' + current + '&kind=';
+      box.querySelector('[data-preview-source]').src = base + 'source';
+      box.querySelector('[data-preview-generated]').src = base + 'generated';
+      box.querySelector('[data-preview-previous]').disabled = current <= 1;
+      box.querySelector('[data-preview-next]').disabled = current >= total;
+    }
+    box.querySelector('[data-preview-previous]').onclick = () => {current=Math.max(1,current-1);render();};
+    box.querySelector('[data-preview-next]').onclick = () => {current=Math.min(total,current+1);render();};
+    box.classList.remove('hidden');
+    render();
+  }
+
   initIcons(); revealInit();
   const year = $('#year'); if (year) year.textContent = new Date().getFullYear();
 
@@ -243,6 +266,7 @@
     async function download(job) {
       latestCompletedJob = job;
       successBox?.classList.remove('hidden');
+      showPdfComparison(job, 'report-compare');
       if (regenPanel) regenPanel.classList.remove('hidden');
       const wordButton = $('#download-word');
       if (wordButton) {
@@ -466,6 +490,7 @@
         if (next.status === 'failed') throw Error(next.error || 'Generation failed.');
         if (next.status === 'completed') {
           job = next;result.classList.remove('hidden');
+          showPdfComparison(next, 'approved-compare');
           const overlap = next.source_overlap_estimate == null ? '' : ` Estimated body-text overlap against the reference: ${(next.source_overlap_estimate*100).toFixed(1)}% (not a plagiarism score).`;
           $('#approved-result-copy').textContent = `The report is ready to review.${overlap} Verify images, citations, dates and approval pages. ${next.warnings?.slice(0,2).join(' ') || ''}`;
           $('#approved-download-word').disabled = !next.downloads?.docx;
