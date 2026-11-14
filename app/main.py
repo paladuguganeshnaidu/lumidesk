@@ -87,6 +87,20 @@ def health():
     return {"status": "ok", "service": "lumidesk-ai", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/api/system/readiness")
+def system_readiness():
+    """Non-secret integration readiness, not a paid inference or quality claim."""
+    return {
+        "service": "lumidesk-ai",
+        "ai_key_configured": bool(os.getenv("NVIDIA_API_KEY", "").strip()),
+        "ai_model_configured": bool(os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b").strip()),
+        "pdf_max_pages": 70,
+        "upload_limit_mb": MAX_UPLOAD_MB,
+        "visual_pdf_qa_enabled": True,
+        "note": "Configured means a key is present; it does not verify provider quota or authorization."
+    }
+
+
 @app.head("/health")
 def health_head():
     return Response(status_code=200)
