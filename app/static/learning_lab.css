@@ -90,3 +90,12 @@
   .workspace-page .learning-actions,.workspace-page .learning-followups,.workspace-page .learning-step-nav{display:none}
   .workspace-page .learning-extras{break-inside:avoid}
 }
+
+/* Responsive connected SVG graph: scroll its own surface, never the whole page. */
+.workspace-page .learning-graph-scroller{width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;margin:4px 0 14px;border:1px solid var(--line);background:var(--dark)}
+.workspace-page .learning-graph-svg{display:block;width:100%;min-width:680px;height:auto;max-height:300px}
+.workspace-page .learning-graph-node{cursor:pointer;outline:none}
+.workspace-page .learning-graph-node rect{transition:stroke .14s,stroke-width .14s}
+.workspace-page .learning-graph-node:hover rect,.workspace-page .learning-graph-node.active rect,.workspace-page .learning-graph-node:focus-visible rect{stroke:#E8913C;stroke-width:2.4}
+@media(max-width:700px){.workspace-page .learning-graph-svg{min-width:720px}}
+@media(prefers-reduced-motion:reduce){.workspace-page .learning-graph-node rect{transition:none}}
